@@ -1,0 +1,73 @@
+#!/bin/bash
+
+display_usage() {
+  echo "Usage: $(basename "$0") [-u USER] [-m MONTH] [-p PATH]"
+  echo ""
+  echo "[-u | --user USER] Git repo user (defaults to git config user.name)"
+  echo "[-m | --month MONTH] Month of report (defaults to current month)"
+  echo "[-p | --path PATH] Path to git repo (defaults to current dir)"
+}
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -u|--user)
+      USER_GITUSER="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -m|--month)
+      USER_MONTH="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -p|--path)
+      USER_REPOPATH="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -h|--help)
+      display_usage
+      shift # past argument
+      ;;
+    *)
+      echo "Unknown parameter passed: $1"
+      exit 1
+      ;;
+  esac
+done
+
+
+YEAR=$(date +%Y)
+CURRENT_MONTH=$(date +%m)
+MONTH=${USER_MONTH:-$CURRENT_MONTH}
+
+CURRENT_DIR=$(pwd)
+ROOTPATH="${HOME}/Documents/reports/${YEAR}/${MONTH}"
+
+if [ "$USER_REPOPATH" == "." ]; then
+  REPOPATH=$CURRENT_DIR
+fi
+REPOPATH=${USER_REPOPATH:-$CURRENT_DIR}
+REPONAME=$(basename "$REPOPATH")
+
+if [ ! -d "$REPOPATH" ]; then
+  echo "$REPOPATH does not exist."
+  exit 1
+fi
+
+if ! git -C "$REPOPATH" rev-parse --git-dir > /dev/null 2>&1; then
+  echo "$REPOPATH is not a git repo"
+  exit 1
+fi
+
+mkdir -p "$ROOTPATH"
+
+cd "$REPOPATH" || exit
+REPO_GITUSER=$(git config user.name)
+GITUSER=${USER_GITUSER:-$REPO_GITUSER}
+git log --since=last.month --author="$GITUSER" -p --branches > "$ROOTPATH/$REPONAME.log"
+echo "Copyrights saved under: $ROOTPATH"
+
+cd "$CURRENT_DIR" || exit
+
+exit 0
