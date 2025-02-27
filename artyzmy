@@ -16,6 +16,17 @@ first_day_of_month() {
   fi
 }
 
+# Function to get the last day of the specified or current month
+last_day_of_month() {
+  local year="$1"
+  local month="$2"
+  if [[ "$(uname)" == "Darwin" ]]; then
+    date -j -v+1m -v1d -v-1d -f "%Y-%m-%d" "$year-$month-01" +"%Y-%m-%d"
+  else
+    date -d "$year-$month-01 +1 month -1 day" +"%Y-%m-%d"
+  fi
+}
+
 # Function to get the currently configured Git user for a repository
 get_git_user() {
   git -C "$1" config user.name
@@ -72,9 +83,7 @@ REPORT_PATH="${REPORT_PATH:-$HOME/Documents/reports/$YEAR-$MONTH/$REPO_NAME.txt}
 mkdir -p "$(dirname "$REPORT_PATH")"
 
 # Generate git log for the given author since the first day of the specified month and year with detailed information
-LOG=$(git -C "$REPO_PATH" log --author="$AUTHOR" --since="$(first_day_of_month "$YEAR" "$MONTH")" \
-  --pretty=format:"Commit: %H%nAuthor: %an <%ae>%nDate: %ci%nMessage: %s%nChanges:%n" \
-  --numstat | awk '{if (NF==3) print "  " $3 " (" $1 " added, " $2 " removed)"; else print $0}' )
+LOG=$(git -C "$REPO_PATH" log -p --author="$AUTHOR" --since="$(first_day_of_month "$YEAR" "$MONTH")" --until="$(last_day_of_month "$YEAR" "$MONTH")")
 
 # Check if the log is empty
 if [[ -z "$LOG" ]]; then
@@ -84,4 +93,3 @@ else
   echo "$LOG" > "$REPORT_PATH"
   echo "Git log for author '$AUTHOR' for $YEAR-$MONTH has been written to $REPORT_PATH."
 fi
-
