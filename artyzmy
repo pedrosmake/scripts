@@ -71,7 +71,11 @@ if ! is_git_repo "$REPO_PATH"; then
 fi
 
 # Extract the repository name from the repo path
-REPO_NAME=$(basename "$REPO_PATH")
+if [[ "$REPO_PATH" == "." ]]; then
+  REPO_NAME=$(basename "$(pwd)")
+else
+  REPO_NAME=$(basename "$REPO_PATH")
+fi
 
 # Set default author to the provided value or the configured Git user if not provided
 AUTHOR="${AUTHOR:-$(get_git_user "$REPO_PATH")}"
@@ -87,9 +91,9 @@ LOG=$(git -C "$REPO_PATH" log -p --author="$AUTHOR" --since="$(first_day_of_mont
 
 # Check if the log is empty
 if [[ -z "$LOG" ]]; then
-  echo "No git log found for author '$AUTHOR' for $YEAR-$MONTH in repository '$REPO_NAME'."
+  echo "No git log found for author '$AUTHOR' for $YEAR-$MONTH in repository '$REPO_NAME'"
 else
   # Write the log to the specified report path
   echo "$LOG" > "$REPORT_PATH"
-  echo "Git log for author '$AUTHOR' for $YEAR-$MONTH has been written to $REPORT_PATH."
+  echo "Git log for author '$AUTHOR' for $YEAR-$MONTH has been written to $REPORT_PATH"
 fi
