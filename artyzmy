@@ -32,16 +32,44 @@ get_git_user() {
   git -C "$1" config user.name
 }
 
+# Function to check if a commit is a merge or squash commit
+is_merge_or_squash_commit() {
+  local commit_hash="$1"
+  local repo_path="$2"
+
+  # Check if commit has more than one parent (merge commit)
+  local parent_count=$(git -C "$repo_path" cat-file -p "$commit_hash" | grep "^parent" | wc -l)
+  if [[ $parent_count -gt 1 ]]; then
+    return 0
+  fi
+
+  # Check if commit message contains typical squash/merge patterns
+  local commit_message=$(git -C "$repo_path" log --format=%s -n 1 "$commit_hash")
+  if [[ "$commit_message" =~ ^Merge\ (branch|pull\ request) ]] || \
+     [[ "$commit_message" =~ \(#[0-9]+\)$ ]] || \
+     [[ "$commit_message" =~ ^Squash ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Function to sanitize filename
+sanitize_filename() {
+  echo "$1" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-50
+}
+
 # Function to display the help message
 show_help() {
-  echo "Usage: $0 [-a author] [-p report_path] [-r repo_path] [-y year] [-m month] [-h|--help]"
+  echo "Usage: $0 [-a author] [-p report_path] [-r repo_path] [-y year] [-m month] [-s|--separate] [-h|--help]"
   echo ""
   echo "Options:"
   echo "  -a, --author       The author name to filter the git log."
-  echo "  -p, --report_path  The path to save the report."
+  echo "  -p, --report_path  The path to save the reports (directory for individual commit files)."
   echo "  -r, --repo_path    The path to the git repository."
   echo "  -y, --year         The year for the report (default: current year)."
   echo "  -m, --month        The month for the report (default: current month)."
+  echo "  -s, --separate     Create separate directory per repository (default: single directory)."
   echo "  -h, --help         Display this help message."
   exit 0
 }
@@ -49,6 +77,7 @@ show_help() {
 # Parse arguments
 YEAR=$(date +%Y)
 MONTH=$(date +%m)
+SEPARATE_DIRS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -a|--author) AUTHOR="$2"; shift 2 ;;
@@ -56,6 +85,7 @@ while [[ $# -gt 0 ]]; do
     -r|--repo_path) REPO_PATH="$2"; shift 2 ;;
     -y|--year) YEAR="$2"; shift 2 ;;
     -m|--month) MONTH="$2"; shift 2 ;;
+    -s|--separate) SEPARATE_DIRS=true; shift ;;
     -h|--help) show_help ;;
     *) echo "Unknown option: $1"; show_help ;;
   esac
@@ -80,20 +110,71 @@ fi
 # Set default author to the provided value or the configured Git user if not provided
 AUTHOR="${AUTHOR:-$(get_git_user "$REPO_PATH")}"
 
-# Set default report path if not provided, including year, month, and repository name
-REPORT_PATH="${REPORT_PATH:-$HOME/Documents/reports/$YEAR-$MONTH/$REPO_NAME.txt}"
-
-# Ensure the report directory exists
-mkdir -p "$(dirname "$REPORT_PATH")"
-
-# Generate git log for the given author since the first day of the specified month and year with detailed information
-LOG=$(git -C "$REPO_PATH" log -p --author="$AUTHOR" --since="$(first_day_of_month "$YEAR" "$MONTH")" --until="$(last_day_of_month "$YEAR" "$MONTH")")
-
-# Check if the log is empty
-if [[ -z "$LOG" ]]; then
-  echo "No git log found for author '$AUTHOR' for $YEAR-$MONTH in repository '$REPO_NAME'"
+# Set default report path based on separate directories flag
+if [[ "$SEPARATE_DIRS" == true ]]; then
+  REPORT_PATH="${REPORT_PATH:-$HOME/Documents/reports/$YEAR-$MONTH/$REPO_NAME}"
 else
-  # Write the log to the specified report path
-  echo "$LOG" > "$REPORT_PATH"
-  echo "Git log for author '$AUTHOR' for $YEAR-$MONTH has been written to $REPORT_PATH"
+  REPORT_PATH="${REPORT_PATH:-$HOME/Documents/reports/$YEAR-$MONTH}"
 fi
+
+# Get commit hashes for the given author since the first day of the specified month and year
+COMMIT_HASHES=$(git -C "$REPO_PATH" log --format="%H" --author="$AUTHOR" --since="$(first_day_of_month "$YEAR" "$MONTH")" --until="$(last_day_of_month "$YEAR" "$MONTH")")
+
+# Check if there are any commits
+if [[ -z "$COMMIT_HASHES" ]]; then
+  echo "No commits found for author '$AUTHOR' for $YEAR-$MONTH in repository '$REPO_NAME'"
+  echo "----------------------------------------------------------------------------------"
+  exit 0
+fi
+
+# Counter for processed commits
+processed_count=0
+skipped_count=0
+directory_created=false
+
+# Process each commit
+while IFS= read -r commit_hash; do
+  [[ -z "$commit_hash" ]] && continue
+
+  # Skip merge/squash commits
+  if is_merge_or_squash_commit "$commit_hash" "$REPO_PATH"; then
+    ((skipped_count++))
+    continue
+  fi
+
+  # Create directory only when we have the first commit to process
+  if [[ "$directory_created" == false ]]; then
+    mkdir -p "$REPORT_PATH"
+    directory_created=true
+  fi
+
+  # Get commit details
+  commit_date=$(git -C "$REPO_PATH" log --format="%ad" --date=format:"%Y-%m" -n 1 "$commit_hash")
+  commit_subject=$(git -C "$REPO_PATH" log --format="%s" -n 1 "$commit_hash")
+  short_hash=$(git -C "$REPO_PATH" rev-parse --short "$commit_hash")
+
+  # Create sanitized filename
+  sanitized_subject=$(sanitize_filename "$commit_subject")
+  if [[ "$SEPARATE_DIRS" == true ]]; then
+    filename="${commit_date}_${sanitized_subject}.txt"
+  else
+    filename="${commit_date}_${REPO_NAME}_${sanitized_subject}.txt"
+  fi
+  filepath="$REPORT_PATH/$filename"
+
+  # Generate detailed commit information
+  git -C "$REPO_PATH" log -p -1 "$commit_hash" > "$filepath"
+
+  ((processed_count++))
+  echo "Created report for commit $short_hash: $filepath"
+
+done <<< "$COMMIT_HASHES"
+
+echo ""
+echo "Summary:"
+echo "  Processed commits: $processed_count"
+echo "  Skipped merge/squash commits: $skipped_count"
+if [[ $processed_count -gt 0 ]]; then
+  echo "  Reports saved in: $REPORT_PATH"
+fi
+echo "----------------------------------------------------------------------------------"
