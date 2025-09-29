@@ -136,12 +136,6 @@ directory_created=false
 while IFS= read -r commit_hash; do
   [[ -z "$commit_hash" ]] && continue
 
-  # Skip merge/squash commits
-  if is_merge_or_squash_commit "$commit_hash" "$REPO_PATH"; then
-    ((skipped_count++))
-    continue
-  fi
-
   # Create directory only when we have the first commit to process
   if [[ "$directory_created" == false ]]; then
     mkdir -p "$REPORT_PATH"
